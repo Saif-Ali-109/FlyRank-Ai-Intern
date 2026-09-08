@@ -90,7 +90,7 @@ the old in-memory version and your new tasks vanish — that's the whole point.
 
 ## SQL queries explored
 
-These were run manually in **DB Browser for SQLite**:
+These were run manually in the **sqlite3 CLI**:
 
 ```sql
 -- List every task
@@ -110,6 +110,10 @@ DELETE FROM tasks WHERE done = 1;
 ```
 
 After running each query, the API immediately reflected the changes.
+
+### Screenshot — SQL queries in sqlite3
+
+![SQL queries executed in sqlite3 CLI](sql-queries.png)
 
 ## Architecture
 
