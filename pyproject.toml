@@ -1,7 +1,7 @@
 [project]
 name = "week-2"
-version = "0.1.0"
-description = "Add your description here"
+version = "2.0.0"
+description = "Task API with SQLite persistence"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
