@@ -14,3 +14,6 @@ build/
 *.log
 .idea/
 .vscode/
+tasks.db
+*.db
+*.db-journal

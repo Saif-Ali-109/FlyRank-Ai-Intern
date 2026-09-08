@@ -1,12 +1,10 @@
-# Task API — W2 · A1
+# Task API — W2 · A2 (SQLite Database)
 
 A tiny **to-do list API** demonstrating full **CRUD** (Create, Read, Update, Delete)
-over an **in-memory** list, built with **FastAPI**. Swagger UI is included for free
+over a **SQLite database**, built with **FastAPI**. Swagger UI is included for free
 at `/docs`.
 
-There is no database on purpose: the data lives in a plain Python list, so it resets
-every time the server restarts. That is next week's lesson — see the
-[Mortality experiment](#the-mortality-experiment) below.
+Tasks are stored in a SQLite file (`tasks.db`) so data **survives server restarts**.
 
 ## Install & run
 
@@ -19,6 +17,8 @@ uvicorn app:app --reload
 
 The server starts on **http://localhost:8000**.
 Open **http://localhost:8000/docs** for interactive Swagger UI.
+
+On first run the `tasks.db` file is created automatically and seeded with 3 example tasks.
 
 ## Endpoints
 
@@ -34,18 +34,29 @@ Open **http://localhost:8000/docs** for interactive Swagger UI.
 
 Every error returns a JSON body of the shape `{ "error": "..." }`.
 
-### Extras (optional, built for fun)
+### Extras
 
-| Method | Path                    | Meaning                                        |
-|--------|-------------------------|------------------------------------------------|
-| GET    | `/tasks?done=true`      | Filter by completion state                     |
-| GET    | `/tasks?search=milk`    | Keep tasks whose title contains the word       |
-| GET    | `/stats`                | `{ "total": 3, "done": 1, "open": 2 }`         |
-| POST   | `/reset`                | Restore the 3 original seed tasks              |
+| Method | Path                         | Meaning                                              |
+|--------|------------------------------|------------------------------------------------------|
+| GET    | `/tasks?done=true`           | Filter by completion state (SQL WHERE)               |
+| GET    | `/tasks?search=milk`         | Keep tasks whose title contains the word (SQL LIKE)  |
+| GET    | `/tasks?sort=asc`            | Sort alphabetically by title (SQL ORDER BY)          |
+| GET    | `/stats`                     | `{ "total": 3, "done": 1, "open": 2 }` (SQL COUNT)  |
+| POST   | `/reset`                     | Restore the 3 original seed tasks                    |
+
+### Task fields
+
+| Field        | Type    | Description                        |
+|--------------|---------|------------------------------------|
+| `id`         | integer | Auto-increment primary key         |
+| `title`      | text    | Task description                   |
+| `done`       | boolean | Completion status                  |
+| `created_at` | text    | ISO-8601 UTC timestamp             |
+| `updated_at` | text    | ISO-8601 UTC timestamp             |
 
 ## Example: `curl -i`
 
-```
+```bash
 $ curl -i -X POST http://localhost:8000/tasks \
        -H "Content-Type: application/json" \
        -d '{"title":"Buy milk"}'
@@ -53,10 +64,9 @@ $ curl -i -X POST http://localhost:8000/tasks \
 HTTP/1.1 201 Created
 date: Mon, 20 Jul 2026 17:44:49 GMT
 server: uvicorn
-content-length: 40
 content-type: application/json
 
-{"id":4,"title":"Buy milk","done":false}
+{"id":4,"title":"Buy milk","done":false,"created_at":"2026-07-20T17:44:49+00:00","updated_at":"2026-07-20T17:44:49+00:00"}
 ```
 
 ## Swagger UI
@@ -65,15 +75,55 @@ content-type: application/json
 
 Use **Try it out** on any endpoint to run the full CRUD cycle without curl.
 
-## The mortality experiment
+## The persistence experiment
 
-Create a few tasks, restart the server, then `GET /tasks`. **Your new tasks are gone**
-and only the 3 seed tasks remain. That happens because the task list lives only in the
-process's memory (a Python variable) — when the process stops, the memory is freed and
-the list is rebuilt from scratch on the next start. A database (next week) persists data
-to disk precisely so it survives restarts.
+Create a few tasks, restart the server, then `GET /tasks`. **Your tasks are still there!**
+That's because they live in `tasks.db` on disk, not just in memory. Try the same with
+the old in-memory version and your new tasks vanish — that's the whole point.
+
+## SQLite — why?
+
+- **Zero setup**: SQLite is a single file (`tasks.db`), no server process needed.
+- **Built into Python**: the `sqlite3` module is part of the standard library.
+- **Perfect for learning**: the same SQL you learn here works on PostgreSQL, MySQL, etc.
+- **Portable**: copy `tasks.db` to another machine and it just works.
+
+## SQL queries explored
+
+These were run manually in **DB Browser for SQLite**:
+
+```sql
+-- List every task
+SELECT * FROM tasks;
+
+-- Show only completed tasks
+SELECT * FROM tasks WHERE done = 1;
+
+-- Count all tasks
+SELECT COUNT(*) FROM tasks;
+
+-- Mark every task as completed
+UPDATE tasks SET done = 1;
+
+-- Delete all completed tasks
+DELETE FROM tasks WHERE done = 1;
+```
+
+After running each query, the API immediately reflected the changes.
+
+## Architecture
+
+```
+Client → API → SQLite Database (tasks.db)
+```
+
+The client doesn't know the difference. `GET /tasks` still returns tasks.
+`POST /tasks` still creates tasks. The only difference is that data persists
+on disk.
 
 ## AI vs me
+
+*(carried over from Part 1)*
 
 **My prompt** (written from memory, not copied from the assignment):
 
@@ -91,31 +141,16 @@ hand-built `app.py` stays hand-built. I ran it on port 8001 and fired my Stage 4
 checkpoint curls at it. Three concrete differences:
 
 1. **Wrong status code for a missing body.** `POST /tasks` with `{}` returned **422**,
-   not the **400** my prompt asked for. The AI leaned on FastAPI's automatic Pydantic
-   validation (a required `title` field), which raises 422 for a malformed body. I
-   understand it: 422 *is* the technically-correct FastAPI default, but it silently
-   ignored my explicit "400" rule.
+   not the **400** my prompt asked for.
 
 2. **A validation rule it quietly dropped.** `POST /tasks` with `{"title":"   "}`
-   (whitespace only) returned **201** and happily created a blank task. My version
-   `.strip()`s the title and rejects it with 400. The AI treated "empty" as "empty
-   string" only, not "empty after trimming".
+   (whitespace only) returned **201** and happily created a blank task.
 
 3. **Different error shape + a silent decision on PUT.** The AI returns
    `{"detail": "..."}` (FastAPI's `HTTPException` default), while mine returns
-   `{"error": "..."}`. And `PUT /tasks/{id}` with an empty body `{}` returned **200**
-   (a no-op update) rather than the **400** I chose — my prompt never said what an empty
-   update body should do, so the AI decided for me.
+   `{"error": "..."}`.
 
 **What my prompt forgot to specify:** the exact JSON error shape, whether whitespace-only
-titles count as empty, and what an empty PUT body should do. The AI filled all three gaps
-with reasonable-but-different defaults.
+titles count as empty, and what an empty PUT body should do.
 
-**One rematch:** I would add one sentence — *"All errors must return `{"error": "..."}`
-with status 400 for any invalid or empty body (including whitespace-only titles) and 404
-for unknown ids; do not rely on FastAPI's default 422."* That single clause closes all
-three gaps at once.
-
-> The lesson: the AI's output was exactly as good as my specification. I could only spot
-> the gaps because I had already built the thing by hand and knew what "correct" looked
-> like.
+> The lesson: the AI's output was exactly as good as my specification.
