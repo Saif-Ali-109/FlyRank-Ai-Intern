@@ -1,24 +1,47 @@
-# Task API — W2 · A2 (SQLite Database)
+# Task API — W3 · A1 (Docker + SQLite + Repository Pattern)
 
-A tiny **to-do list API** demonstrating full **CRUD** (Create, Read, Update, Delete)
-over a **SQLite database**, built with **FastAPI**. Swagger UI is included for free
-at `/docs`.
+A tiny **to-do list API** demonstrating full **CRUD** with **Docker**, **SQLite**, and a
+clean **repository pattern** — built with **FastAPI**. Data persists across container
+restarts via a Docker volume.
 
-Tasks are stored in a SQLite file (`tasks.db`) so data **survives server restarts**.
+## Architecture
 
-## Install & run
+```
+Client → API (app.py) → Repository (repository.py) → SQLite (tasks.db)
+```
+
+**Key insight**: `app.py` contains only routes. All database logic lives in
+`repository.py`. To swap SQLite for PostgreSQL later, you change **one file** —
+the routes and API contract stay identical.
+
+## Quick start
+
+### Option A — Docker (recommended)
+
+```bash
+docker compose up --build
+```
+
+The API starts at **http://localhost:8000**.
+Swagger UI at **http://localhost:8000/docs**.
+
+### Option B — Local
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-uvicorn app:app --reload
+DB_PATH=tasks.db uvicorn app:app --reload
 ```
 
-The server starts on **http://localhost:8000**.
-Open **http://localhost:8000/docs** for interactive Swagger UI.
+## Environment variables
 
-On first run the `tasks.db` file is created automatically and seeded with 3 example tasks.
+| Variable  | Default      | Description                    |
+|-----------|--------------|--------------------------------|
+| `DB_PATH` | `tasks.db`   | Path to the SQLite database    |
+
+The `.env` file sets `DB_PATH=/data/tasks.db` for Docker.
+A committed `.env.example` shows the required variables.
 
 ## Endpoints
 
@@ -32,98 +55,97 @@ On first run the `tasks.db` file is created automatically and seeded with 3 exam
 | PUT    | `/tasks/{id}`   | Update | 200     | 400 empty/invalid body, 404 id  | Update title and/or done         |
 | DELETE | `/tasks/{id}`   | Delete | 204     | 404 unknown id                  | Remove a task                    |
 
-Every error returns a JSON body of the shape `{ "error": "..." }`.
-
 ### Extras
 
-| Method | Path                         | Meaning                                              |
-|--------|------------------------------|------------------------------------------------------|
-| GET    | `/tasks?done=true`           | Filter by completion state (SQL WHERE)               |
-| GET    | `/tasks?search=milk`         | Keep tasks whose title contains the word (SQL LIKE)  |
-| GET    | `/tasks?sort=asc`            | Sort alphabetically by title (SQL ORDER BY)          |
-| GET    | `/stats`                     | `{ "total": 3, "done": 1, "open": 2 }` (SQL COUNT)  |
-| POST   | `/reset`                     | Restore the 3 original seed tasks                    |
+| Method | Path                    | Meaning                                        |
+|--------|-------------------------|------------------------------------------------|
+| GET    | `/tasks?done=true`      | Filter by completion state                     |
+| GET    | `/tasks?search=milk`    | Keep tasks whose title contains the word       |
+| GET    | `/tasks?sort=asc`       | Sort alphabetically by title                   |
+| GET    | `/stats`                | `{ "total": 3, "done": 1, "open": 2 }`         |
+| POST   | `/reset`                | Restore the 3 original seed tasks              |
 
-### Task fields
+## Repository pattern — what changed
 
-| Field        | Type    | Description                        |
-|--------------|---------|------------------------------------|
-| `id`         | integer | Auto-increment primary key         |
-| `title`      | text    | Task description                   |
-| `done`       | boolean | Completion status                  |
-| `created_at` | text    | ISO-8601 UTC timestamp             |
-| `updated_at` | text    | ISO-8601 UTC timestamp             |
+The routes in `app.py` did not change. Only the storage implementation swapped:
 
-## Example: `curl -i`
+| Before (A2)                | After (A3)                          |
+|----------------------------|-------------------------------------|
+| SQL calls in every route   | `repo.get_all()`, `repo.create()`, etc. |
+| `DB_PATH = "tasks.db"`     | `DB_PATH` from `.env`               |
+| No Docker                  | `docker compose up` runs everything |
 
-```bash
-$ curl -i -X POST http://localhost:8000/tasks \
-       -H "Content-Type: application/json" \
-       -d '{"title":"Buy milk"}'
+This separation proves the assignment's core lesson:
 
-HTTP/1.1 201 Created
-date: Mon, 20 Jul 2026 17:44:49 GMT
-server: uvicorn
-content-type: application/json
+> *"Switch storage = change one file. The API stays the same."*
 
-{"id":4,"title":"Buy milk","done":false,"created_at":"2026-07-20T17:44:49+00:00","updated_at":"2026-07-20T17:44:49+00:00"}
+## Docker — how it works
+
+```
+docker compose up
+    └── app container
+         ├── /app/tasks.db  ← Docker volume (persists on host)
+         └── reads DB_PATH from .env
 ```
 
-## Swagger UI
+- **Volume**: `task-data:/data` keeps `tasks.db` alive when the container stops.
+- **`.env`**: sets `DB_PATH=/data/tasks.db` inside the container.
+- **`.env.example`**: committed template so others know what variables are needed.
 
-![Swagger UI showing all endpoints](swagger-ui.png)
+## Persistence proof
 
-Use **Try it out** on any endpoint to run the full CRUD cycle without curl.
+```
+1. docker compose up --build
+2. POST /tasks {"title":"Docker persistence test"}  → 201
+3. GET /tasks  → 4 tasks (including the new one)
+4. docker compose down
+5. docker compose up -d
+6. GET /tasks  → 4 tasks (data survived!) ✓
+```
 
-## The persistence experiment
+## SQL schema
 
-Create a few tasks, restart the server, then `GET /tasks`. **Your tasks are still there!**
-That's because they live in `tasks.db` on disk, not just in memory. Try the same with
-the old in-memory version and your new tasks vanish — that's the whole point.
-
-## SQLite — why?
-
-- **Zero setup**: SQLite is a single file (`tasks.db`), no server process needed.
-- **Built into Python**: the `sqlite3` module is part of the standard library.
-- **Perfect for learning**: the same SQL you learn here works on PostgreSQL, MySQL, etc.
-- **Portable**: copy `tasks.db` to another machine and it just works.
+```sql
+-- init.sql
+CREATE TABLE IF NOT EXISTS tasks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    title      TEXT    NOT NULL,
+    done       BOOLEAN NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL,
+    updated_at TEXT    NOT NULL
+);
+```
 
 ## SQL queries explored
 
-These were run manually in the **sqlite3 CLI**:
-
 ```sql
--- List every task
 SELECT * FROM tasks;
-
--- Show only completed tasks
 SELECT * FROM tasks WHERE done = 1;
-
--- Count all tasks
 SELECT COUNT(*) FROM tasks;
-
--- Mark every task as completed
 UPDATE tasks SET done = 1;
-
--- Delete all completed tasks
 DELETE FROM tasks WHERE done = 1;
 ```
-
-After running each query, the API immediately reflected the changes.
 
 ### Screenshot — SQL queries in sqlite3
 
 ![SQL queries executed in sqlite3 CLI](sql-queries.png)
 
-## Architecture
+## Swagger UI
 
-```
-Client → API → SQLite Database (tasks.db)
-```
+![Swagger UI showing all endpoints](swagger-ui.png)
 
-The client doesn't know the difference. `GET /tasks` still returns tasks.
-`POST /tasks` still creates tasks. The only difference is that data persists
-on disk.
+## Files
+
+| File                | Purpose                                    |
+|---------------------|--------------------------------------------|
+| `app.py`            | Routes only — calls repository methods     |
+| `repository.py`     | All SQLite logic — the swappable layer     |
+| `Dockerfile`        | Python 3.12-slim image                     |
+| `docker-compose.yml`| Runs app with volume for persistence       |
+| `init.sql`          | Table creation SQL                         |
+| `.env`              | DB_PATH for Docker (gitignored)            |
+| `.env.example`      | Committed template                         |
+| `requirements.txt`  | Python dependencies                        |
 
 ## AI vs me
 
@@ -141,20 +163,10 @@ on disk.
 > Swagger UI at `/docs`.
 
 The AI's code lives in [`ai-version/main.py`](ai-version/main.py), untouched, so my
-hand-built `app.py` stays hand-built. I ran it on port 8001 and fired my Stage 4
-checkpoint curls at it. Three concrete differences:
+hand-built `app.py` stays hand-built. Three concrete differences:
 
-1. **Wrong status code for a missing body.** `POST /tasks` with `{}` returned **422**,
-   not the **400** my prompt asked for.
-
-2. **A validation rule it quietly dropped.** `POST /tasks` with `{"title":"   "}`
-   (whitespace only) returned **201** and happily created a blank task.
-
-3. **Different error shape + a silent decision on PUT.** The AI returns
-   `{"detail": "..."}` (FastAPI's `HTTPException` default), while mine returns
-   `{"error": "..."}`.
-
-**What my prompt forgot to specify:** the exact JSON error shape, whether whitespace-only
-titles count as empty, and what an empty PUT body should do.
+1. **Wrong status code for a missing body.** 422 instead of 400.
+2. **A validation rule it quietly dropped.** Whitespace-only titles accepted.
+3. **Different error shape + a silent decision on PUT.** `{"detail": "..."}` vs `{"error": "..."}`.
 
 > The lesson: the AI's output was exactly as good as my specification.

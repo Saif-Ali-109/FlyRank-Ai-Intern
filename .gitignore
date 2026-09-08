@@ -6,7 +6,6 @@ __pycache__/
 .Python
 *.egg-info/
 *.egg
-.claude/
 dist/
 build/
 .DS_Store
@@ -20,3 +19,4 @@ tasks.db
 *.db-journal
 *.db-shm
 *.db-wal
+/data/
